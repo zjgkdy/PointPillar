@@ -17,8 +17,8 @@ from second.builder import target_assigner_builder, voxel_builder
 from second.data.preprocess import merge_second_batch
 from second.protos import pipeline_pb2
 from second.pytorch.builder import (box_coder_builder, input_reader_builder,
-                                      lr_scheduler_builder, optimizer_builder,
-                                      second_builder)
+                                    lr_scheduler_builder, optimizer_builder,
+                                    second_builder)
 from second.utils.eval import get_coco_eval_result, get_official_eval_result
 from second.utils.progress_bar import ProgressBar
 
@@ -60,48 +60,38 @@ def flat_nested_json_dict(json_dict, sep=".") -> dict:
     return flatted
 
 
-def example_convert_to_torch(example, dtype=torch.float32,
-                             device=None) -> dict:
+def example_convert_to_torch(example, dtype=torch.float32, device=None) -> dict:
     device = device or torch.device("cuda:0")
     example_torch = {}
-    float_names = [
-        "voxels", "anchors", "reg_targets", "reg_weights", "bev_map", "rect",
-        "Trv2c", "P2"
-    ]
+    float_names = ["voxels", "anchors", "reg_targets", "reg_weights", "bev_map", "rect", "Trv2c", "P2"]
 
     for k, v in example.items():
         if k in float_names:
             example_torch[k] = torch.as_tensor(v, dtype=dtype, device=device)
         elif k in ["coordinates", "labels", "num_points"]:
-            example_torch[k] = torch.as_tensor(
-                v, dtype=torch.int32, device=device)
+            example_torch[k] = torch.as_tensor(v, dtype=torch.int32, device=device)
         elif k in ["anchors_mask"]:
-            example_torch[k] = torch.as_tensor(
-                v, dtype=torch.uint8, device=device)
+            example_torch[k] = torch.as_tensor(v, dtype=torch.uint8, device=device)
         else:
             example_torch[k] = v
     return example_torch
 
 
-def train(config_path,
-          model_dir,
-          result_path=None,
-          create_folder=False,
+def train(config_path='./configs/pointpillars/car/xyres_16.proto',
+          model_dir='/home/luoteng/PointPillar/second/my_model',
           display_step=50,
           summary_step=5,
           pickle_result=True):
-    """train a VoxelNet model specified by a config file.
-    """
-    if create_folder:
-        if pathlib.Path(model_dir).exists():
-            model_dir = torchplus.train.create_folder(model_dir)
 
+    # 创建相关目录
     model_dir = pathlib.Path(model_dir)
-    model_dir.mkdir(parents=True, exist_ok=True)
+    result_path = model_dir / 'results'
     eval_checkpoint_dir = model_dir / 'eval_checkpoints'
+    model_dir.mkdir(parents=True, exist_ok=True)
+    result_path.mkdir(parents=True, exist_ok=True)
     eval_checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    if result_path is None:
-        result_path = model_dir / 'results'
+
+    # 模型配置文件解析
     config_file_bkp = "pipeline.config"
     config = pipeline_pb2.TrainEvalPipelineConfig()
     with open(config_path, "r") as f:
@@ -113,140 +103,141 @@ def train(config_path,
     model_cfg = config.model.second
     train_cfg = config.train_config
 
-    class_names = list(input_cfg.class_names)
     ######################
-    # BUILD VOXEL GENERATOR
+    # 体素生成器 + Anchor 生成器
     ######################
-    voxel_generator = voxel_builder.build(model_cfg.voxel_generator)
-    ######################
-    # BUILD TARGET ASSIGNER
-    ######################
-    bv_range = voxel_generator.point_cloud_range[[0, 1, 3, 4]]
-    box_coder = box_coder_builder.build(model_cfg.box_coder)
+    class_names = list(input_cfg.class_names)  # 类别名
+    voxel_generator = voxel_builder.build(model_cfg.voxel_generator)  # 体素生成器
+    bv_range = voxel_generator.point_cloud_range[[0, 1, 3, 4]]  # 点云BEV范围
+    box_coder = box_coder_builder.build(model_cfg.box_coder)  # 边界框编码类型：ground_box3d_coder
     target_assigner_cfg = model_cfg.target_assigner
-    target_assigner = target_assigner_builder.build(target_assigner_cfg,
-                                                    bv_range, box_coder)
+    target_assigner = target_assigner_builder.build(target_assigner_cfg, bv_range, box_coder)  # 锚点框生成器
+
     ######################
-    # BUILD NET
+    # 网络模型
     ######################
-    center_limit_range = model_cfg.post_center_limit_range
+    center_limit_range = model_cfg.post_center_limit_range  # 检测目标中心点坐标限制：[xmin, ymin, zmin, xmax, ymax, zmax]
     net = second_builder.build(model_cfg, voxel_generator, target_assigner)
     net.cuda()
-    # net_train = torch.nn.DataParallel(net).cuda()
     print("num_trainable parameters:", len(list(net.parameters())))
-    # for n, p in net.named_parameters():
-    #     print(n, p.shape)
+
     ######################
-    # BUILD OPTIMIZER
+    # 准备优化器和学习率调度器
     ######################
-    # we need global_step to create lr_scheduler, so restore net first.
-    torchplus.train.try_restore_latest_checkpoints(model_dir, [net])
-    gstep = net.get_global_step() - 1
+    torchplus.train.try_restore_latest_checkpoints(model_dir, [net])  # 尝试恢复模型检查点，让训练从上次中断的地方继续
+    gstep = net.get_global_step() - 1  # 全局训练步骤 - 1
     optimizer_cfg = train_cfg.optimizer
     if train_cfg.enable_mixed_precision:
         net.half()
         net.metrics_to_float()
         net.convert_norm_to_float(net)
-    optimizer = optimizer_builder.build(optimizer_cfg, net.parameters())
+
+    optimizer = optimizer_builder.build(optimizer_cfg, net.parameters())  # 构建优化器
+
     if train_cfg.enable_mixed_precision:
         loss_scale = train_cfg.loss_scale_factor
-        mixed_optimizer = torchplus.train.MixedPrecisionWrapper(
-            optimizer, loss_scale)
+        mixed_optimizer = torchplus.train.MixedPrecisionWrapper(optimizer, loss_scale)
     else:
         mixed_optimizer = optimizer
-    # must restore optimizer AFTER using MixedPrecisionWrapper
-    torchplus.train.try_restore_latest_checkpoints(model_dir,
-                                                   [mixed_optimizer])
+
+    torchplus.train.try_restore_latest_checkpoints(model_dir, [mixed_optimizer])
     lr_scheduler = lr_scheduler_builder.build(optimizer_cfg, optimizer, gstep)
     if train_cfg.enable_mixed_precision:
         float_dtype = torch.float16
     else:
         float_dtype = torch.float32
-    ######################
-    # PREPARE INPUT
-    ######################
 
-    dataset = input_reader_builder.build(
-        input_cfg,
-        model_cfg,
-        training=True,
-        voxel_generator=voxel_generator,
-        target_assigner=target_assigner)
-    eval_dataset = input_reader_builder.build(
-        eval_input_cfg,
-        model_cfg,
-        training=False,
-        voxel_generator=voxel_generator,
-        target_assigner=target_assigner)
+    ######################
+    # 准备数据集加载器
+    ######################
+    dataset = input_reader_builder.build(input_cfg,
+                                         model_cfg,
+                                         training=True,
+                                         voxel_generator=voxel_generator,
+                                         target_assigner=target_assigner)
+
+    eval_dataset = input_reader_builder.build(eval_input_cfg,
+                                              model_cfg,
+                                              training=False,
+                                              voxel_generator=voxel_generator,
+                                              target_assigner=target_assigner)
 
     def _worker_init_fn(worker_id):
         time_seed = np.array(time.time(), dtype=np.int32)
         np.random.seed(time_seed + worker_id)
         print(f"WORKER {worker_id} seed:", np.random.get_state()[1][0])
 
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=input_cfg.batch_size,
-        shuffle=True,
-        num_workers=input_cfg.num_workers,
-        pin_memory=False,
-        collate_fn=merge_second_batch,
-        worker_init_fn=_worker_init_fn)
-    eval_dataloader = torch.utils.data.DataLoader(
-        eval_dataset,
-        batch_size=eval_input_cfg.batch_size,
-        shuffle=False,
-        num_workers=eval_input_cfg.num_workers,
-        pin_memory=False,
-        collate_fn=merge_second_batch)
+    dataloader = torch.utils.data.DataLoader(dataset,
+                                             batch_size=input_cfg.batch_size,
+                                             shuffle=True,
+                                             num_workers=input_cfg.num_workers,
+                                             pin_memory=False,
+                                             collate_fn=merge_second_batch,  # 批次数据打包函数 （默认将数据和标签打包成一个元组）
+                                             worker_init_fn=_worker_init_fn)  # 为每个进程设置随机种子，防止加载数据种的随机性冲突
+
+    eval_dataloader = torch.utils.data.DataLoader(eval_dataset,
+                                                  batch_size=eval_input_cfg.batch_size,
+                                                  shuffle=False,
+                                                  num_workers=eval_input_cfg.num_workers,
+                                                  pin_memory=False,
+                                                  collate_fn=merge_second_batch)
     data_iter = iter(dataloader)
 
     ######################
-    # TRAINING
+    # 训练
     ######################
+    # 日志文件
     log_path = model_dir / 'log.txt'
     logf = open(log_path, 'a')
     logf.write(proto_str)
     logf.write("\n")
+
+    # tensorboard 可视化文件
     summary_dir = model_dir / 'summary'
     summary_dir.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(str(summary_dir))
 
     total_step_elapsed = 0
-    remain_steps = train_cfg.steps - net.get_global_step()
     t = time.time()
     ckpt_start_time = t
 
-    total_loop = train_cfg.steps // train_cfg.steps_per_eval + 1
-    # total_loop = remain_steps // train_cfg.steps_per_eval + 1
-    clear_metrics_every_epoch = train_cfg.clear_metrics_every_epoch
-
+    # 计算评估次数
     if train_cfg.steps % train_cfg.steps_per_eval == 0:
-        total_loop -= 1
-    mixed_optimizer.zero_grad()
+        total_loop = train_cfg.steps // train_cfg.steps_per_eval
+    else:
+        total_loop = train_cfg.steps // train_cfg.steps_per_eval + 1
+
+    clear_metrics_every_epoch = train_cfg.clear_metrics_every_epoch  # 默认：False
+    mixed_optimizer.zero_grad()  # 提取清零
+
+    # 评估训练
     try:
         for _ in range(total_loop):
+            # 计算本轮评估需要训练的步数
             if total_step_elapsed + train_cfg.steps_per_eval > train_cfg.steps:
                 steps = train_cfg.steps % train_cfg.steps_per_eval
             else:
                 steps = train_cfg.steps_per_eval
+
+            # 本轮评估训练
             for step in range(steps):
                 lr_scheduler.step()
+
+                # 从训练集中提取一个 mini-batch
                 try:
                     example = next(data_iter)
                 except StopIteration:
                     print("end epoch")
                     if clear_metrics_every_epoch:
                         net.clear_metrics()
-                    data_iter = iter(dataloader)
+                    data_iter = iter(dataloader)  # 重新打乱样本顺序组成mini-batch迭代器
                     example = next(data_iter)
-                example_torch = example_convert_to_torch(example, float_dtype)
-
                 batch_size = example["anchors"].shape[0]
 
+                # 前向传播
+                example_torch = example_convert_to_torch(example, float_dtype)
                 ret_dict = net(example_torch)
 
-                # box_preds = ret_dict["box_preds"]
                 cls_preds = ret_dict["cls_preds"]
                 loss = ret_dict["loss"].mean()
                 cls_loss_reduced = ret_dict["cls_loss_reduced"].mean()
@@ -281,8 +272,7 @@ def train(config_path,
                 global_step = net.get_global_step()
                 if global_step % display_step == 0:
                     loc_loss_elem = [
-                        float(loc_loss[:, :, i].sum().detach().cpu().numpy() /
-                              batch_size) for i in range(loc_loss.shape[-1])
+                        float(loc_loss[:, :, i].sum().detach().cpu().numpy() / batch_size) for i in range(loc_loss.shape[-1])
                     ]
                     metrics["step"] = global_step
                     metrics["steptime"] = step_time
@@ -453,8 +443,7 @@ def _predict_kitti_to_file(net,
                 # print(img_shape)
                 if center_limit_range is not None:
                     limit_range = np.array(center_limit_range)
-                    if (np.any(box_lidar[:3] < limit_range[:3])
-                            or np.any(box_lidar[:3] > limit_range[3:])):
+                    if (np.any(box_lidar[:3] < limit_range[:3]) or np.any(box_lidar[:3] > limit_range[3:])):
                         continue
                 bbox[2:] = np.minimum(bbox[2:], image_shape[::-1])
                 bbox[:2] = np.maximum(bbox[:2], [0, 0])
@@ -512,16 +501,14 @@ def predict_kitti_to_anno(net,
                 # print(img_shape)
                 if center_limit_range is not None:
                     limit_range = np.array(center_limit_range)
-                    if (np.any(box_lidar[:3] < limit_range[:3])
-                            or np.any(box_lidar[:3] > limit_range[3:])):
+                    if (np.any(box_lidar[:3] < limit_range[:3]) or np.any(box_lidar[:3] > limit_range[3:])):
                         continue
                 bbox[2:] = np.minimum(bbox[2:], image_shape[::-1])
                 bbox[:2] = np.maximum(bbox[:2], [0, 0])
                 anno["name"].append(class_names[int(label)])
                 anno["truncated"].append(0.0)
                 anno["occluded"].append(0)
-                anno["alpha"].append(-np.arctan2(-box_lidar[1], box_lidar[0]) +
-                                     box[6])
+                anno["alpha"].append(-np.arctan2(-box_lidar[1], box_lidar[0]) + box[6])
                 anno["bbox"].append(bbox)
                 anno["dimensions"].append(box[3:6])
                 anno["location"].append(box[:3])
@@ -656,4 +643,5 @@ def evaluate(config_path,
 
 
 if __name__ == '__main__':
-    fire.Fire()
+    # fire.Fire()
+    train()

@@ -104,5 +104,10 @@ venv.bak/
 
 # mypy
 .mypy_cache/
-
 .vscode
+
+# other big file
+SparseConvNet/
+second/model
+second/my_model
+

@@ -692,7 +692,7 @@ def do_eval_v2(gt_annos,
                current_classes,
                min_overlaps,
                compute_aos=False,
-               difficultys = [0, 1, 2]):
+               difficultys=[0, 1, 2]):
     # min_overlaps: [num_minoverlap, metric, num_class]
     ret = eval_class_v3(gt_annos, dt_annos, current_classes, difficultys, 0,
                         min_overlaps, compute_aos)
@@ -716,7 +716,7 @@ def do_coco_style_eval(gt_annos, dt_annos, current_classes, overlap_ranges,
     min_overlaps = np.zeros([10, *overlap_ranges.shape[1:]])
     for i in range(overlap_ranges.shape[1]):
         for j in range(overlap_ranges.shape[2]):
-            min_overlaps[:, i, j] = np.linspace(*overlap_ranges[:, i, j])
+            min_overlaps[:, i, j] = np.linspace(*overlap_ranges[:, i, j].astype(int))
     mAP_bbox, mAP_bev, mAP_3d, mAP_aos = do_eval_v2(
         gt_annos, dt_annos, current_classes, min_overlaps, compute_aos)
     # ret: [num_class, num_diff, num_minoverlap]
@@ -918,16 +918,16 @@ def get_coco_eval_result(gt_annos, dt_annos, current_classes):
             (f"{class_to_name[curcls]} "
                 "coco AP@{:.2f}:{:.2f}:{:.2f}:".format(*o_range)))
         result += print_str((f"bbox AP:{mAPbbox[j, 0]:.2f}, "
-                                f"{mAPbbox[j, 1]:.2f}, "
-                                f"{mAPbbox[j, 2]:.2f}"))
+                             f"{mAPbbox[j, 1]:.2f}, "
+                             f"{mAPbbox[j, 2]:.2f}"))
         result += print_str((f"bev  AP:{mAPbev[j, 0]:.2f}, "
-                                f"{mAPbev[j, 1]:.2f}, "
-                                f"{mAPbev[j, 2]:.2f}"))
+                             f"{mAPbev[j, 1]:.2f}, "
+                             f"{mAPbev[j, 2]:.2f}"))
         result += print_str((f"3d   AP:{mAP3d[j, 0]:.2f}, "
-                                f"{mAP3d[j, 1]:.2f}, "
-                                f"{mAP3d[j, 2]:.2f}"))
+                             f"{mAP3d[j, 1]:.2f}, "
+                             f"{mAP3d[j, 2]:.2f}"))
         if compute_aos:
             result += print_str((f"aos  AP:{mAPaos[j, 0]:.2f}, "
-                                    f"{mAPaos[j, 1]:.2f}, "
-                                    f"{mAPaos[j, 2]:.2f}"))
+                                 f"{mAPaos[j, 1]:.2f}, "
+                                 f"{mAPaos[j, 2]:.2f}"))
     return result

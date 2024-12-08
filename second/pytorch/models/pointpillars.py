@@ -47,18 +47,24 @@ class PFNLayer(nn.Module):
         self.norm = BatchNorm1d(self.units)
 
     def forward(self, inputs):
+        """_summary_
 
-        x = self.linear(inputs)
-        x = self.norm(x.permute(0, 2, 1).contiguous()).permute(0, 2, 1).contiguous()
-        x = F.relu(x)
+        Args:
+            inputs (_type_): pillar点组 [P N D]
 
-        x_max = torch.max(x, dim=1, keepdim=True)[0]
+        Returns:
+            _type_: _description_ 特征 [P 1 D']
+        """
+        x = self.linear(inputs)                                                         # MLP: [P N D']
+        x = self.norm(x.permute(0, 2, 1).contiguous()).permute(0, 2, 1).contiguous()    # BatchNorm
+        x = F.relu(x)                                                                   # ReLU
+        x_max = torch.max(x, dim=1, keepdim=True)[0]                                    # MaxPooling: [P 1 D']
 
         if self.last_vfe:
             return x_max
         else:
-            x_repeat = x_max.repeat(1, inputs.shape[1], 1)
-            x_concatenated = torch.cat([x, x_repeat], dim=2)
+            x_repeat = x_max.repeat(1, inputs.shape[1], 1)  # [P N D']
+            x_concatenated = torch.cat([x, x_repeat], dim=2)  # [P N 2D']
             return x_concatenated
 
 
@@ -85,13 +91,21 @@ class PillarFeatureNet(nn.Module):
         super().__init__()
         self.name = 'PillarFeatureNet'
         assert len(num_filters) > 0
+
+        # 输入特征数
         num_input_features += 5
         if with_distance:
             num_input_features += 1
         self._with_distance = with_distance
 
-        # Create PillarFeatureNet layers
-        num_filters = [num_input_features] + list(num_filters)
+        # Pillar 网格尺寸, X/Y 偏置
+        self.vx = voxel_size[0]
+        self.vy = voxel_size[1]
+        self.x_offset = self.vx / 2 + pc_range[0]
+        self.y_offset = self.vy / 2 + pc_range[1]
+
+        # PillarFeatureNet
+        num_filters = [num_input_features] + list(num_filters)  # [9， 64]
         pfn_layers = []
         for i in range(len(num_filters) - 1):
             in_filters = num_filters[i]
@@ -103,48 +117,50 @@ class PillarFeatureNet(nn.Module):
             pfn_layers.append(PFNLayer(in_filters, out_filters, use_norm, last_layer=last_layer))
         self.pfn_layers = nn.ModuleList(pfn_layers)
 
-        # Need pillar (voxel) size and x/y offset in order to calculate pillar offset
-        self.vx = voxel_size[0]
-        self.vy = voxel_size[1]
-        self.x_offset = self.vx / 2 + pc_range[0]
-        self.y_offset = self.vy / 2 + pc_range[1]
-
     def forward(self, features, num_voxels, coors):
+        """_summary_
 
-        # Find distance of x, y, and z from cluster center
-        points_mean = features[:, :, :3].sum(dim=1, keepdim=True) / num_voxels.type_as(features).view(-1, 1, 1)
-        f_cluster = features[:, :, :3] - points_mean
+        Args:
+            features (_type_): Pillar点组信息  [P N D]
+            num_voxels (_type_): Pillar有效点数  [P]
+            coors (_type_): Pillar点坐标  [P N 3]
 
-        # Find distance of x, y, and z from pillar center
-        f_center = torch.zeros_like(features[:, :, :2])
-        f_center[:, :, 0] = features[:, :, 0] - (coors[:, 3].float().unsqueeze(1) * self.vx + self.x_offset)
-        f_center[:, :, 1] = features[:, :, 1] - (coors[:, 2].float().unsqueeze(1) * self.vy + self.y_offset)
+        Returns:
+            _type_: Pillar特征向量  [P D']
+        """
+        # 扩展几何特征：到 pillar 点组质心的三轴偏移
+        points_mean = features[:, :, :3].sum(dim=1, keepdim=True) / num_voxels.type_as(features).view(-1, 1, 1)  # [P 1 3]
+        f_cluster = features[:, :, :3] - points_mean  # [P N 3]
 
-        # Combine together feature decorations
+        # 扩展几何特征：到 pillar 中心的二轴偏移
+        f_center = torch.zeros_like(features[:, :, :2])  # [P N 2]
+        f_center[:, :, 0] = features[:, :, 0] - (coors[:, 3].float().unsqueeze(1) * self.vx + self.x_offset)  # [P N 1]
+        f_center[:, :, 1] = features[:, :, 1] - (coors[:, 2].float().unsqueeze(1) * self.vy + self.y_offset)  # [P N 1]
+
+        # 特征拼接
         features_ls = [features, f_cluster, f_center]
         if self._with_distance:
-            points_dist = torch.norm(features[:, :, :3], 2, 2, keepdim=True)
+            points_dist = torch.norm(features[:, :, :3], 2, 2, keepdim=True)  # 计算L2范数：[P N 1]
             features_ls.append(points_dist)
-        features = torch.cat(features_ls, dim=-1)
+        features = torch.cat(features_ls, dim=-1)  # [P N D+5]
 
-        # The feature decorations were calculated without regard to whether pillar was empty. Need to ensure that
-        # empty pillars remain set to zeros.
-        voxel_count = features.shape[1]
-        mask = get_paddings_indicator(num_voxels, voxel_count, axis=0)
-        mask = torch.unsqueeze(mask, -1).type_as(features)
-        features *= mask
+        # Pillar点数不足时零填充
+        voxel_count = features.shape[1]  # N
+        mask = get_paddings_indicator(num_voxels, voxel_count, axis=0)  # [P N]
+        mask = torch.unsqueeze(mask, -1).type_as(features)  # [P N 1]
+        features *= mask  # [P N 1]
 
-        # Forward pass through PFNLayers
+        # PFNLayers：前向传播
         for pfn in self.pfn_layers:
-            features = pfn(features)
+            features = pfn(features)  # [P 1 D']
 
-        return features.squeeze()
+        return features.squeeze()  # 去除张量中所有大小为 1 的维度：[P D']
 
 
 class PointPillarsScatter(nn.Module):
     def __init__(self,
-                 output_shape,
-                 num_input_features=64):
+                 output_shape,              # 输出稠密伪图像尺寸
+                 num_input_features=64):    # 输入特征通道数
         """
         Point Pillar's Scatter.
         Converts learned features from dense tensor to sparse pseudo image. This replaces SECOND's

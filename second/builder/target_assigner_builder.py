@@ -5,6 +5,7 @@ from second.protos import target_pb2, anchors_pb2
 from second.builder import similarity_calculator_builder
 from second.builder import anchor_generator_builder
 
+
 def build(target_assigner_config, bv_range, box_coder):
     """Builds a tensor dictionary based on the InputReader config.
 
@@ -21,16 +22,19 @@ def build(target_assigner_config, bv_range, box_coder):
     if not isinstance(target_assigner_config, (target_pb2.TargetAssigner)):
         raise ValueError('input_reader_config not of type '
                          'input_reader_pb2.InputReader.')
+
+    # anchor 尺寸信息
     anchor_cfg = target_assigner_config.anchor_generators
     anchor_generators = []
     for a_cfg in anchor_cfg:
         anchor_generator = anchor_generator_builder.build(a_cfg)
         anchor_generators.append(anchor_generator)
-    similarity_calc = similarity_calculator_builder.build(
-        target_assigner_config.region_similarity_calculator)
+
+    similarity_calc = similarity_calculator_builder.build(target_assigner_config.region_similarity_calculator)
     positive_fraction = target_assigner_config.sample_positive_fraction
     if positive_fraction < 0:
         positive_fraction = None
+
     target_assigner = TargetAssigner(
         box_coder=box_coder,
         anchor_generators=anchor_generators,
@@ -38,4 +42,3 @@ def build(target_assigner_config, bv_range, box_coder):
         positive_fraction=positive_fraction,
         sample_size=target_assigner_config.sample_size)
     return target_assigner
-

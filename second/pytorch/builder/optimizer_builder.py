@@ -45,18 +45,16 @@ def build(optimizer_config, params, name=None):
 
     if optimizer_type == 'momentum_optimizer':
         config = optimizer_config.momentum_optimizer
-        optimizer = torch.optim.SGD(
-            params,
-            lr=_get_base_lr_by_lr_scheduler(config.learning_rate),
-            momentum=config.momentum_optimizer_value,
-            weight_decay=config.weight_decay)
+        optimizer = torch.optim.SGD(params,
+                                    lr=_get_base_lr_by_lr_scheduler(config.learning_rate),
+                                    momentum=config.momentum_optimizer_value,
+                                    weight_decay=config.weight_decay)
 
     if optimizer_type == 'adam_optimizer':
         config = optimizer_config.adam_optimizer
-        optimizer = torch.optim.Adam(
-            params,
-            lr=_get_base_lr_by_lr_scheduler(config.learning_rate),
-            weight_decay=config.weight_decay)
+        optimizer = torch.optim.Adam(params,
+                                     lr=_get_base_lr_by_lr_scheduler(config.learning_rate),
+                                     weight_decay=config.weight_decay)
 
     if optimizer is None:
         raise ValueError('Optimizer %s not supported.' % optimizer_type)

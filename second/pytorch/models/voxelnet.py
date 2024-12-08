@@ -15,8 +15,8 @@ from torchplus.ops.array_ops import gather_nd, scatter_nd
 from torchplus.tools import change_default_args
 from second.pytorch.core import box_torch_ops
 from second.pytorch.core.losses import (WeightedSigmoidClassificationLoss,
-                                          WeightedSmoothL1LocalizationLoss,
-                                          WeightedSoftmaxClassificationLoss)
+                                        WeightedSmoothL1LocalizationLoss,
+                                        WeightedSoftmaxClassificationLoss)
 from second.pytorch.models.pointpillars import PillarFeatureNet, PointPillarsScatter
 from second.pytorch.utils import get_paddings_indicator
 
@@ -346,14 +346,11 @@ class RPN(nn.Module):
         assert all([x == factors[0] for x in factors])
         if use_norm:
             if use_groupnorm:
-                BatchNorm2d = change_default_args(
-                    num_groups=num_groups, eps=1e-3)(GroupNorm)
+                BatchNorm2d = change_default_args(num_groups=num_groups, eps=1e-3)(GroupNorm)
             else:
-                BatchNorm2d = change_default_args(
-                    eps=1e-3, momentum=0.01)(nn.BatchNorm2d)
+                BatchNorm2d = change_default_args(eps=1e-3, momentum=0.01)(nn.BatchNorm2d)
             Conv2d = change_default_args(bias=False)(nn.Conv2d)
-            ConvTranspose2d = change_default_args(bias=False)(
-                nn.ConvTranspose2d)
+            ConvTranspose2d = change_default_args(bias=False)(nn.ConvTranspose2d)
         else:
             BatchNorm2d = Empty
             Conv2d = change_default_args(bias=True)(nn.Conv2d)
@@ -376,51 +373,45 @@ class RPN(nn.Module):
             )
             block2_input_filters += 64
 
+        # ************************ DownSampling BLOCK1：Pseudo image ----> H/2 * W/2 * C ************************
         self.block1 = Sequential(
             nn.ZeroPad2d(1),
-            Conv2d(
-                num_input_filters, num_filters[0], 3, stride=layer_strides[0]),
+            Conv2d(num_input_filters, num_filters[0], 3, stride=layer_strides[0]),
             BatchNorm2d(num_filters[0]),
             nn.ReLU(),
         )
         for i in range(layer_nums[0]):
-            self.block1.add(
-                Conv2d(num_filters[0], num_filters[0], 3, padding=1))
+            self.block1.add(Conv2d(num_filters[0], num_filters[0], 3, padding=1))
             self.block1.add(BatchNorm2d(num_filters[0]))
             self.block1.add(nn.ReLU())
+
+        # ************************ UpSampling BLOCK1：H/2 * W/2 * C ----> H/2 * W/2 * 2C ************************
         self.deconv1 = Sequential(
-            ConvTranspose2d(
-                num_filters[0],
-                num_upsample_filters[0],
-                upsample_strides[0],
-                stride=upsample_strides[0]),
+            ConvTranspose2d(num_filters[0], num_upsample_filters[0], upsample_strides[0], stride=upsample_strides[0]),
             BatchNorm2d(num_upsample_filters[0]),
             nn.ReLU(),
         )
+
+        # ************************ DownSampling BLOCK2：H/2 * W/2 * C ----> H/4 * W/4 * 2C ************************
         self.block2 = Sequential(
             nn.ZeroPad2d(1),
-            Conv2d(
-                block2_input_filters,
-                num_filters[1],
-                3,
-                stride=layer_strides[1]),
+            Conv2d(block2_input_filters, num_filters[1], 3, stride=layer_strides[1]),
             BatchNorm2d(num_filters[1]),
             nn.ReLU(),
         )
         for i in range(layer_nums[1]):
-            self.block2.add(
-                Conv2d(num_filters[1], num_filters[1], 3, padding=1))
+            self.block2.add(Conv2d(num_filters[1], num_filters[1], 3, padding=1))
             self.block2.add(BatchNorm2d(num_filters[1]))
             self.block2.add(nn.ReLU())
+
+        # ************************ UpSampling BLOCK2：H/4 * W/4 * 2C ----> H/2 * W/2 * 2C ************************
         self.deconv2 = Sequential(
-            ConvTranspose2d(
-                num_filters[1],
-                num_upsample_filters[1],
-                upsample_strides[1],
-                stride=upsample_strides[1]),
+            ConvTranspose2d(num_filters[1], num_upsample_filters[1], upsample_strides[1], stride=upsample_strides[1]),
             BatchNorm2d(num_upsample_filters[1]),
             nn.ReLU(),
         )
+
+        # ************************ DownSampling BLOCK3：H/4 * W/4 * 2C ----> H/8 * W/8 * 4C ************************
         self.block3 = Sequential(
             nn.ZeroPad2d(1),
             Conv2d(num_filters[1], num_filters[2], 3, stride=layer_strides[2]),
@@ -428,29 +419,27 @@ class RPN(nn.Module):
             nn.ReLU(),
         )
         for i in range(layer_nums[2]):
-            self.block3.add(
-                Conv2d(num_filters[2], num_filters[2], 3, padding=1))
+            self.block3.add(Conv2d(num_filters[2], num_filters[2], 3, padding=1))
             self.block3.add(BatchNorm2d(num_filters[2]))
             self.block3.add(nn.ReLU())
+
+        # ************************ UpSampling BLOCK3：H/8 * W/8 * 4C ----> H/2 * W/2 * 2C ************************
         self.deconv3 = Sequential(
-            ConvTranspose2d(
-                num_filters[2],
-                num_upsample_filters[2],
-                upsample_strides[2],
-                stride=upsample_strides[2]),
+            ConvTranspose2d(num_filters[2], num_upsample_filters[2], upsample_strides[2], stride=upsample_strides[2]),
             BatchNorm2d(num_upsample_filters[2]),
             nn.ReLU(),
         )
+
         if encode_background_as_zeros:
-            num_cls = num_anchor_per_loc * num_class
+            num_cls = num_anchor_per_loc * num_class  # 每个位置的分类输出数量（不包含背景类）
         else:
             num_cls = num_anchor_per_loc * (num_class + 1)
-        self.conv_cls = nn.Conv2d(sum(num_upsample_filters), num_cls, 1)
-        self.conv_box = nn.Conv2d(
-            sum(num_upsample_filters), num_anchor_per_loc * box_code_size, 1)
+
+        # ***************************************** Detection Head (SSD) *****************************************
+        self.conv_cls = nn.Conv2d(sum(num_upsample_filters), num_cls, 1)  # 卷积输出分类信息
+        self.conv_box = nn.Conv2d(sum(num_upsample_filters), num_anchor_per_loc * box_code_size, 1)  # 卷积输出bbox信息
         if use_direction_classifier:
-            self.conv_dir_cls = nn.Conv2d(
-                sum(num_upsample_filters), num_anchor_per_loc * 2, 1)
+            self.conv_dir_cls = nn.Conv2d(sum(num_upsample_filters), num_anchor_per_loc * 2, 1)  # 卷积输出离散航向信息
 
     def forward(self, x, bev=None):
         x = self.block1(x)
@@ -564,38 +553,36 @@ class VoxelNet(nn.Module):
         self._cls_loss_weight = cls_loss_weight
         self._loc_loss_weight = loc_loss_weight
 
-        vfe_class_dict = {
-            "VoxelFeatureExtractor": VoxelFeatureExtractor,
-            "VoxelFeatureExtractorV2": VoxelFeatureExtractorV2,
-            "PillarFeatureNet": PillarFeatureNet
-        }
+        ####################
+        # 点云特征编码网络
+        ####################
+        vfe_class_dict = {"VoxelFeatureExtractor": VoxelFeatureExtractor,
+                          "VoxelFeatureExtractorV2": VoxelFeatureExtractorV2,
+                          "PillarFeatureNet": PillarFeatureNet}
         vfe_class = vfe_class_dict[vfe_class_name]
         if vfe_class_name == "PillarFeatureNet":
-            self.voxel_feature_extractor = vfe_class(
-                num_input_features,
-                use_norm,
-                num_filters=vfe_num_filters,
-                with_distance=with_distance,
-                voxel_size=voxel_size,
-                pc_range=pc_range
-            )
+            self.voxel_feature_extractor = vfe_class(num_input_features,            # 输入特征
+                                                     use_norm,
+                                                     num_filters=vfe_num_filters,   # 编码特征通道数
+                                                     with_distance=with_distance,
+                                                     voxel_size=voxel_size,
+                                                     pc_range=pc_range)
         else:
-            self.voxel_feature_extractor = vfe_class(
-                num_input_features,
-                use_norm,
-                num_filters=vfe_num_filters,
-                with_distance=with_distance)
+            self.voxel_feature_extractor = vfe_class(num_input_features,
+                                                     use_norm,
+                                                     num_filters=vfe_num_filters,
+                                                     with_distance=with_distance)
 
+        ####################
+        # Backbone 特征提取
+        ####################
         print("middle_class_name", middle_class_name)
         if middle_class_name == "PointPillarsScatter":
-            self.middle_feature_extractor = PointPillarsScatter(output_shape=output_shape,
-                                                                num_input_features=vfe_num_filters[-1])
+            self.middle_feature_extractor = PointPillarsScatter(output_shape=output_shape, num_input_features=vfe_num_filters[-1])
             num_rpn_input_filters = self.middle_feature_extractor.nchannels
         else:
-            mid_class_dict = {
-                "MiddleExtractor": MiddleExtractor,
-                "SparseMiddleExtractor": SparseMiddleExtractor,
-            }
+            mid_class_dict = {"MiddleExtractor": MiddleExtractor,
+                              "SparseMiddleExtractor": SparseMiddleExtractor}
             mid_class = mid_class_dict[middle_class_name]
             self.middle_feature_extractor = mid_class(
                 output_shape,
@@ -611,29 +598,28 @@ class VoxelNet(nn.Module):
             else:
                 num_rpn_input_filters = int(middle_num_filters_d2[-1] * 2)
 
-        rpn_class_dict = {
-            "RPN": RPN,
-        }
+        ####################
+        # Head 目标检测
+        ####################
+        rpn_class_dict = {"RPN": RPN, }
         rpn_class = rpn_class_dict[rpn_class_name]
-        self.rpn = rpn_class(
-            use_norm=True,
-            num_class=num_class,
-            layer_nums=rpn_layer_nums,
-            layer_strides=rpn_layer_strides,
-            num_filters=rpn_num_filters,
-            upsample_strides=rpn_upsample_strides,
-            num_upsample_filters=rpn_num_upsample_filters,
-            num_input_filters=num_rpn_input_filters,
-            num_anchor_per_loc=target_assigner.num_anchors_per_location,
-            encode_background_as_zeros=encode_background_as_zeros,
-            use_direction_classifier=use_direction_classifier,
-            use_bev=use_bev,
-            use_groupnorm=use_groupnorm,
-            num_groups=num_groups,
-            box_code_size=target_assigner.box_coder.code_size)
+        self.rpn = rpn_class(use_norm=True,
+                             num_class=num_class,
+                             layer_nums=rpn_layer_nums,
+                             layer_strides=rpn_layer_strides,
+                             num_filters=rpn_num_filters,
+                             upsample_strides=rpn_upsample_strides,
+                             num_upsample_filters=rpn_num_upsample_filters,
+                             num_input_filters=num_rpn_input_filters,
+                             num_anchor_per_loc=target_assigner.num_anchors_per_location,
+                             encode_background_as_zeros=encode_background_as_zeros,
+                             use_direction_classifier=use_direction_classifier,
+                             use_bev=use_bev,
+                             use_groupnorm=use_groupnorm,
+                             num_groups=num_groups,
+                             box_code_size=target_assigner.box_coder.code_size)  # Backbone Net (2D CNN)
 
-        self.rpn_acc = metrics.Accuracy(
-            dim=-1, encode_background_as_zeros=encode_background_as_zeros)
+        self.rpn_acc = metrics.Accuracy(dim=-1, encode_background_as_zeros=encode_background_as_zeros)
         self.rpn_precision = metrics.Precision(dim=-1)
         self.rpn_recall = metrics.Recall(dim=-1)
         self.rpn_metrics = metrics.PrecisionRecall(
@@ -908,7 +894,7 @@ class VoxelNet(nn.Module):
                 label_preds = selected_labels
                 if self._use_direction_classifier:
                     dir_labels = selected_dir_labels
-                    opp_labels = (box_preds[..., -1] > 0) ^ dir_labels.byte()
+                    opp_labels = (box_preds[..., -1] > 0).bool() ^ dir_labels.bool()
                     box_preds[..., -1] += torch.where(
                         opp_labels,
                         torch.tensor(np.pi).type_as(box_preds),
@@ -1059,8 +1045,7 @@ def create_loss(loc_loss_ftor,
     else:
         cls_preds = cls_preds.view(batch_size, -1, num_class + 1)
     cls_targets = cls_targets.squeeze(-1)
-    one_hot_targets = torchplus.nn.one_hot(
-        cls_targets, depth=num_class + 1, dtype=box_preds.dtype)
+    one_hot_targets = torchplus.nn.one_hot(cls_targets, depth=num_class + 1, dtype=box_preds.dtype)
     if encode_background_as_zeros:
         one_hot_targets = one_hot_targets[..., 1:]
     if encode_rad_error_by_sin:
@@ -1068,8 +1053,7 @@ def create_loss(loc_loss_ftor,
         box_preds, reg_targets = add_sin_difference(box_preds, reg_targets)
     loc_losses = loc_loss_ftor(
         box_preds, reg_targets, weights=reg_weights)  # [N, M]
-    cls_losses = cls_loss_ftor(
-        cls_preds, one_hot_targets, weights=cls_weights)  # [N, M]
+    cls_losses = cls_loss_ftor(cls_preds, one_hot_targets, weights=cls_weights)  # [N, M]
     return loc_losses, cls_losses
 
 

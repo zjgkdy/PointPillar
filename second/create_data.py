@@ -63,10 +63,10 @@ def create_kitti_info_file(data_path,
                            save_path=None,
                            create_trainval=False,
                            relative_path=True):
-    train_img_ids = _read_imageset_file("./data/ImageSets/train.txt")
-    val_img_ids = _read_imageset_file("./data/ImageSets/val.txt")
-    trainval_img_ids = _read_imageset_file("./data/ImageSets/trainval.txt")
-    test_img_ids = _read_imageset_file("./data/ImageSets/test.txt")
+    train_img_ids = _read_imageset_file("/home/luoteng/PointPillar/second/data/ImageSets/train.txt")
+    val_img_ids = _read_imageset_file("/home/luoteng/PointPillar/second/data/ImageSets/val.txt")
+    trainval_img_ids = _read_imageset_file("/home/luoteng/PointPillar/second/data/ImageSets/trainval.txt")
+    test_img_ids = _read_imageset_file("/home/luoteng/PointPillar/second/data/ImageSets/test.txt")
 
     print("Generate info. this may take several minutes.")
     if save_path is None:
@@ -236,7 +236,7 @@ def create_groundtruth_database(data_path,
         Trv2c = info['calib/Tr_velo_to_cam']
         if not lidar_only:
             points = box_np_ops.remove_outside_points(points, rect, Trv2c, P2,
-                                                        info["img_shape"])
+                                                      info["img_shape"])
 
         annos = info["annos"]
         names = annos["name"]
@@ -246,11 +246,11 @@ def create_groundtruth_database(data_path,
         num_obj = np.sum(annos["index"] >= 0)
         rbbox_cam = kitti.anno_to_rbboxes(annos)[:num_obj]
         rbbox_lidar = box_np_ops.box_camera_to_lidar(rbbox_cam, rect, Trv2c)
-        if bev_only: # set z and h to limits
+        if bev_only:  # set z and h to limits
             assert coors_range is not None
             rbbox_lidar[:, 2] = coors_range[2]
             rbbox_lidar[:, 5] = coors_range[5] - coors_range[2]
-        
+
         group_dict = {}
         group_ids = np.full([bboxes.shape[0]], -1, dtype=np.int64)
         if "group_ids" in annos:

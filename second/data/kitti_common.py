@@ -104,17 +104,21 @@ def get_image_path(idx, prefix, training=True, relative_path=True, exist_check=T
     return get_kitti_info_path(idx, prefix, 'image_2', '.png', training,
                                relative_path, exist_check)
 
+
 def get_label_path(idx, prefix, training=True, relative_path=True, exist_check=True):
     return get_kitti_info_path(idx, prefix, 'label_2', '.txt', training,
                                relative_path, exist_check)
+
 
 def get_velodyne_path(idx, prefix, training=True, relative_path=True, exist_check=True):
     return get_kitti_info_path(idx, prefix, 'velodyne', '.bin', training,
                                relative_path, exist_check)
 
+
 def get_calib_path(idx, prefix, training=True, relative_path=True, exist_check=True):
     return get_kitti_info_path(idx, prefix, 'calib', '.txt', training,
                                relative_path, exist_check)
+
 
 def _extend_matrix(mat):
     mat = np.concatenate([mat, np.array([[0., 0., 0., 1.]])], axis=0)
@@ -219,6 +223,7 @@ def label_str_to_int(labels, remove_dontcare=True, dtype=np.int32):
         ret = ret[ret > 0]
     return ret
 
+
 def get_class_to_label_map():
     class_to_label = {
         'Car': 0,
@@ -233,12 +238,15 @@ def get_class_to_label_map():
     }
     return class_to_label
 
+
 def get_classes():
     return get_class_to_label_map().keys()
 
+
 def filter_gt_boxes(gt_boxes, gt_labels, used_classes):
-    mask = np.array([l in used_classes for l in gt_labels], dtype=np.bool)
+    mask = np.array([l in used_classes for l in gt_labels], dtype=bool)
     return mask
+
 
 def filter_anno_by_mask(image_anno, mask):
     img_filtered_annotations = {}
@@ -261,6 +269,7 @@ def filter_infos_by_used_classes(infos, used_classes):
             new_infos.append(info)
     return new_infos
 
+
 def remove_dontcare(image_anno):
     img_filtered_annotations = {}
     relevant_annotation_indices = [
@@ -270,6 +279,7 @@ def remove_dontcare(image_anno):
         img_filtered_annotations[key] = (
             image_anno[key][relevant_annotation_indices])
     return img_filtered_annotations
+
 
 def remove_low_height(image_anno, thresh):
     img_filtered_annotations = {}
@@ -281,6 +291,7 @@ def remove_low_height(image_anno, thresh):
             image_anno[key][relevant_annotation_indices])
     return img_filtered_annotations
 
+
 def remove_low_score(image_anno, thresh):
     img_filtered_annotations = {}
     relevant_annotation_indices = [
@@ -291,12 +302,14 @@ def remove_low_score(image_anno, thresh):
             image_anno[key][relevant_annotation_indices])
     return img_filtered_annotations
 
+
 def keep_arrays_by_name(gt_names, used_classes):
     inds = [
         i for i, x in enumerate(gt_names) if x in used_classes
     ]
     inds = np.array(inds, dtype=np.int64)
     return inds
+
 
 def drop_arrays_by_name(gt_names, used_classes):
     inds = [
@@ -305,8 +318,10 @@ def drop_arrays_by_name(gt_names, used_classes):
     inds = np.array(inds, dtype=np.int64)
     return inds
 
+
 def apply_mask_(array_dict):
     pass
+
 
 def filter_kitti_anno(image_anno,
                       used_classes,
@@ -403,6 +418,7 @@ def filter_annos_low_height(image_annos, thresh):
         new_image_annos.append(img_filtered_annotations)
     return new_image_annos
 
+
 def filter_empty_annos(image_annos):
     new_image_annos = []
     for anno in image_annos:
@@ -455,6 +471,7 @@ def kitti_result_line(result_dict, precision=4):
                 res_dict.keys()))
     return ' '.join(res_line)
 
+
 def annos_to_kitti_label(annos):
     num_instance = len(annos["name"])
     result_lines = []
@@ -463,7 +480,7 @@ def annos_to_kitti_label(annos):
             'name': annos["name"][i],
             'truncated': annos["truncated"][i],
             'occluded': annos["occluded"][i],
-            'alpha':annos["alpha"][i],
+            'alpha': annos["alpha"][i],
             'bbox': annos["bbox"][i],
             'dimensions': annos["dimensions"][i],
             'location': annos["location"][i],
@@ -472,6 +489,7 @@ def annos_to_kitti_label(annos):
         line = kitti_result_line(result_dict)
         result_lines.append(line)
     return result_lines
+
 
 def add_difficulty_to_annos(info):
     min_height = [40, 25,
@@ -489,9 +507,9 @@ def add_difficulty_to_annos(info):
     occlusion = annos['occluded']
     truncation = annos['truncated']
     diff = []
-    easy_mask = np.ones((len(dims), ), dtype=np.bool)
-    moderate_mask = np.ones((len(dims), ), dtype=np.bool)
-    hard_mask = np.ones((len(dims), ), dtype=np.bool)
+    easy_mask = np.ones((len(dims), ), dtype=bool)
+    moderate_mask = np.ones((len(dims), ), dtype=bool)
+    hard_mask = np.ones((len(dims), ), dtype=bool)
     i = 0
     for h, o, t in zip(height, occlusion, truncation):
         if o > max_occlusion[0] or h <= min_height[0] or t > max_trunc[0]:
@@ -535,11 +553,11 @@ def add_difficulty_to_annos_v2(info):
     truncation = annos['truncated']
     diff = []
     easy_mask = not ((occlusion > max_occlusion[0]) or (height < min_height[0])
-                 or (truncation > max_trunc[0]))
+                     or (truncation > max_trunc[0]))
     moderate_mask = not ((occlusion > max_occlusion[1]) or (height < min_height[1])
-                 or (truncation > max_trunc[1]))
+                         or (truncation > max_trunc[1]))
     hard_mask = not ((occlusion > max_occlusion[2]) or (height < min_height[2])
-                 or (truncation > max_trunc[2]))
+                     or (truncation > max_trunc[2]))
     is_easy = easy_mask
     is_moderate = np.logical_xor(easy_mask, moderate_mask)
     is_hard = np.logical_xor(hard_mask, moderate_mask)
@@ -615,6 +633,7 @@ def get_pseudo_label_anno():
     })
     return annotations
 
+
 def get_start_result_anno():
     annotations = {}
     annotations.update({
@@ -630,6 +649,7 @@ def get_start_result_anno():
     })
     return annotations
 
+
 def empty_result_anno():
     annotations = {}
     annotations.update({
@@ -644,6 +664,7 @@ def empty_result_anno():
         'score': np.array([]),
     })
     return annotations
+
 
 def get_label_annos(label_folder, image_ids=None):
     if image_ids is None:

@@ -1,5 +1,6 @@
 #ifndef NMS_CPU_H
 #define NMS_CPU_H
+#include <iostream>
 #include <pybind11/pybind11.h>
 // must include pybind11/stl.h if using containers in STL in arguments.
 #include <pybind11/stl.h>
@@ -7,16 +8,18 @@
 #include <vector>
 #include <algorithm>
 #include <boost/geometry.hpp>
-template<typename DType, typename ShapeContainer>
-inline py::array_t<DType> constant(ShapeContainer shape, DType value){
+template <typename DType, typename ShapeContainer>
+inline py::array_t<DType> constant(ShapeContainer shape, DType value)
+{
     // create ROWMAJOR array.
     py::array_t<DType> array(shape);
     std::fill(array.mutable_data(), array.mutable_data() + array.size(), value);
     return array;
 }
 
-template<typename DType>
-inline py::array_t<DType> zeros(std::vector<long int> shape){
+template <typename DType>
+inline py::array_t<DType> zeros(std::vector<long int> shape)
+{
     return constant<DType, std::vector<long int>>(shape, 0);
 }
 
@@ -25,7 +28,7 @@ std::vector<int> non_max_suppression_cpu(
     py::array_t<DType> boxes,
     py::array_t<int> order,
     DType thresh,
-    DType eps=0)
+    DType eps = 0)
 {
     auto ndets = boxes.shape(0);
     auto boxes_r = boxes.template unchecked<2>();
@@ -35,32 +38,37 @@ std::vector<int> non_max_suppression_cpu(
     auto area = zeros<DType>({ndets});
     auto area_rw = area.template mutable_unchecked<1>();
     // get areas
-    for(int i = 0; i < ndets; ++i){
+    for (int i = 0; i < ndets; ++i)
+    {
         area_rw(i) = (boxes_r(i, 2) - boxes_r(i, 0) + eps) * (boxes_r(i, 3) - boxes_r(i, 1) + eps);
     }
     std::vector<int> keep;
     int i, j;
     DType xx1, xx2, w, h, inter, ovr;
-    for(int _i = 0; _i < ndets; ++_i){
+    for (int _i = 0; _i < ndets; ++_i)
+    {
         i = order_r(_i);
-        if(suppressed_rw(i) == 1)
+        if (suppressed_rw(i) == 1)
             continue;
         keep.push_back(i);
-        for(int _j = _i + 1; _j < ndets; ++_j){
+        for (int _j = _i + 1; _j < ndets; ++_j)
+        {
             j = order_r(_j);
-            if(suppressed_rw(j) == 1)
+            if (suppressed_rw(j) == 1)
                 continue;
             xx2 = std::min(boxes_r(i, 2), boxes_r(j, 2));
             xx1 = std::max(boxes_r(i, 0), boxes_r(j, 0));
             w = xx2 - xx1 + eps;
-            if (w > 0){
+            if (w > 0)
+            {
                 xx2 = std::min(boxes_r(i, 3), boxes_r(j, 3));
                 xx1 = std::max(boxes_r(i, 1), boxes_r(j, 1));
                 h = xx2 - xx1 + eps;
-                if (h > 0){
+                if (h > 0)
+                {
                     inter = w * h;
                     ovr = inter / (area_rw(i) + area_rw(j) - inter);
-                    if(ovr >= thresh)
+                    if (ovr >= thresh)
                         suppressed_rw(j) = 1;
                 }
             }
@@ -92,19 +100,22 @@ std::vector<int> rotate_non_max_suppression_cpu(
     std::vector<polygon_t> poly_inter, poly_union;
     DType inter_area, union_area, overlap;
 
-    for(int _i = 0; _i < ndets; ++_i){
+    for (int _i = 0; _i < ndets; ++_i)
+    {
         i = order_r(_i);
-        if(suppressed_rw(i) == 1)
+        if (suppressed_rw(i) == 1)
             continue;
         keep.push_back(i);
-        for(int _j = _i + 1; _j < ndets; ++_j){
+        for (int _j = _i + 1; _j < ndets; ++_j)
+        {
             j = order_r(_j);
-            if(suppressed_rw(j) == 1)
+            if (suppressed_rw(j) == 1)
                 continue;
             if (standup_iou_r(i, j) <= 0.0)
                 continue;
             // std::cout << "pre_poly" << std::endl;
-            try {
+            try
+            {
                 bg::append(poly, point_t(box_corners_r(i, 0, 0), box_corners_r(i, 0, 1)));
                 bg::append(poly, point_t(box_corners_r(i, 1, 0), box_corners_r(i, 1, 1)));
                 bg::append(poly, point_t(box_corners_r(i, 2, 0), box_corners_r(i, 2, 1)));
@@ -116,13 +127,17 @@ std::vector<int> rotate_non_max_suppression_cpu(
                 bg::append(qpoly, point_t(box_corners_r(j, 3, 0), box_corners_r(j, 3, 1)));
                 bg::append(qpoly, point_t(box_corners_r(j, 0, 0), box_corners_r(j, 0, 1)));
                 bg::intersection(poly, qpoly, poly_inter);
-            } catch (const std::exception& e) {
+            }
+            catch (const std::exception &e)
+            {
                 std::cout << "box i corners:" << std::endl;
-                for(int k = 0; k < 4; ++k){
+                for (int k = 0; k < 4; ++k)
+                {
                     std::cout << box_corners_r(i, k, 0) << " " << box_corners_r(i, k, 1) << std::endl;
                 }
-                std::cout << "box j corners:" <<  std::endl;
-                for(int k = 0; k < 4; ++k){
+                std::cout << "box j corners:" << std::endl;
+                for (int k = 0; k < 4; ++k)
+                {
                     std::cout << box_corners_r(j, k, 0) << " " << box_corners_r(j, k, 1) << std::endl;
                 }
                 // throw e;
@@ -148,12 +163,13 @@ std::vector<int> rotate_non_max_suppression_cpu(
                     }
                 }*/
                 // std::cout << "post_union" << poly_union.empty() << std::endl;
-                if (!poly_union.empty()){ // ignore invalid box
+                if (!poly_union.empty())
+                { // ignore invalid box
                     union_area = bg::area(poly_union.front());
                     // std::cout << "post union area" << std::endl;
                     // std::cout << union_area << "debug" << std::endl;
                     overlap = inter_area / union_area;
-                    if(overlap >= thresh)
+                    if (overlap >= thresh)
                         suppressed_rw(j) = 1;
                     poly_union.clear();
                 }
@@ -161,7 +177,6 @@ std::vector<int> rotate_non_max_suppression_cpu(
             poly.clear();
             qpoly.clear();
             poly_inter.clear();
-
         }
     }
     return keep;
